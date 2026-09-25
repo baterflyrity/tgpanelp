@@ -47,6 +47,8 @@ export function useAuth(): AuthState & { retry: () => void } {
       const map: Record<string, string> = {
         invalid_init_data: "Telegram signature check failed.",
         not_allowed: "You are not on the allow-list for this bot.",
+        dev_auth_disabled: "Testing mode is off on this server. Open the app inside Telegram (or enable DEV_AUTH=1).",
+        server_not_configured: "Server is missing its BOT_TOKEN configuration.",
       };
       throw new Error(map[body.error ?? ""] ?? `Auth failed (${res.status})`);
     }
@@ -65,12 +67,11 @@ export function useAuth(): AuthState & { retry: () => void } {
 
         if (initData) {
           await authenticate(initData);
-        } else if (import.meta.env.DEV) {
-          // Local browser testing against a DEV_AUTH=1 server.
+        } else {
+          // No Telegram context: try testing mode. The server decides whether
+          // it is enabled (.env.dev / DEV_AUTH=1) — the client never guesses.
           const devId = Number(new URLSearchParams(location.search).get("devUserId") ?? 1);
           await authenticate("", devId);
-        } else {
-          throw new Error("This app must be opened inside Telegram.");
         }
       } catch (err) {
         if (!cancelled) {

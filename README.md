@@ -20,8 +20,10 @@ Telegram client
 - **Proxy:** `http-proxy-middleware` with cookie rewriting so upstream apps
   that set their own cookies keep working; hop-by-hop headers are stripped.
 - **WebSockets:** upgrade requests under `/svc/*` are proxied too.
-- **Dev mode:** `DEV_AUTH=1` lets you test in a desktop browser without
-  Telegram, using `?devUserId=123`.
+- **Testing mode:** with `DEV_AUTH=1` (via `.env.dev`), anyone can test in a
+  plain browser using `?devUserId=123` — no Telegram needed. `.env.dev` is
+  loaded ONLY in testing runs (`NODE_ENV=development` or
+  `TG_MINIAPP_MODE=preview`); production loads `.env` exclusively.
 
 ## Setup
 
@@ -73,6 +75,9 @@ The service becomes available at `/svc/game/` for authorized users.
 bun run build
 bun run start        # serves dist/ + API + proxy on one port
 ```
+
+In production only `.env` is read — `.env.dev`/`env.dev` are ignored, and
+`DEV_AUTH=1` must never be set there.
 
 Or with Docker:
 

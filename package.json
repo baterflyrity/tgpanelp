@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "NODE_ENV=development tsx watch server/index.ts",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },

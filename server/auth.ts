@@ -92,6 +92,10 @@ export async function handleAuth(req: Request, res: Response): Promise<void> {
   let user: TelegramUser | null = null;
 
   if (initData) {
+    if (!BOT_TOKEN) {
+      res.status(500).json({ error: "server_not_configured" });
+      return;
+    }
     const validated = validateInitData(initData, BOT_TOKEN);
     user = validated?.user ?? null;
   } else if (DEV_AUTH) {
@@ -105,7 +109,9 @@ export async function handleAuth(req: Request, res: Response): Promise<void> {
   }
 
   if (!user) {
-    res.status(401).json({ error: "invalid_init_data" });
+    const code = DEV_AUTH ? "invalid_init_data" : "dev_auth_disabled";
+    const status = DEV_AUTH ? 401 : 403;
+    res.status(status).json({ error: code });
     return;
   }
   if (!isUserAllowed(user.id)) {
