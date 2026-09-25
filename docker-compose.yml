@@ -1,0 +1,11 @@
+services:
+  miniapp-proxy:
+    build: .
+    restart: unless-stopped
+    # host networking lets the container reach 127.0.0.1:<port> services
+    # running directly on the server. Remove if your upstreams are on a
+    # docker network instead.
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./services.json:/app/services.json:ro
