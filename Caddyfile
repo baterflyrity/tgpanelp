@@ -1,0 +1,31 @@
+# Caddyfile for docker-compose.yml (production).
+#
+# Certificate lifecycle is fully automatic: Caddy issues via Let's Encrypt
+# (ACME) and renews automatically in the background — no cron, no certbot.
+# Certs live in /data, persisted by the caddy_data volume in the compose file.
+#
+# Requirements for real certificates:
+#   - DOMAIN must have a public DNS A/AAAA record pointing at this server
+#     (DNS records do not include ports, so any public HTTPS port works)
+#   - Port 80 must be reachable from the internet for the HTTP-01 challenge
+#   - The container always listens on 443 internally; choose the PUBLIC
+#     https port with HTTPS_PORT in docker-compose.yml (e.g. 8443), which
+#     maps host:8443 → container:443. Users then visit
+#     https://your.domain:8443.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Proxy everything to the mini-app server inside the compose network.
+	reverse_proxy proxy:3000
+
+	# WebSocket-friendly by default; headers below are the useful minimum.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

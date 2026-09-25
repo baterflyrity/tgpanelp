@@ -1,52 +1,55 @@
 # Development stack: the mini-app proxy plus DUMB STUB SERVICES standing in
-# for the real dashboards from services.json (game → 127.0.0.1:15080,
-# home → 127.0.0.1:8123). The stubs publish on the host loopback at exactly
-# those ports, so services.json needs no changes.
+# for the real dashboards. NO host networking: only the app port is published
+# to the host; stubs live on the internal compose network and are reached via
+# compose service DNS names.
+#
+# Because of that, the proxy uses services.dev.json whose targets are the
+# compose DNS names (http://stub-game:80, http://stub-home:8123) instead of
+# your production 127.0.0.1:* targets.
 #
 # Usage:
 #   docker compose -f docker-compose.dev.yml up --build
 #   open http://localhost:3000/?devUserId=1
 #
-# The proxy runs in testing mode (TG_MINIAPP_MODE=preview + DEV_AUTH=1 via
-# the mounted env.dev), so any browser can log in with ?devUserId=<n>.
-#
-# Note: `network_mode: host` for the proxy requires Linux. On macOS/Windows
-# (Docker Desktop) replace it with extra_hosts + targets of
-# http://host.docker.internal:15080 in services.json instead.
+# Testing mode (TG_MINIAPP_MODE=preview + DEV_AUTH=1 via mounted env.dev)
+# lets any browser log in with ?devUserId=<n>.
 
 services:
-  # ── The mini-app proxy (this repo) ────────────────────────────────────────
   proxy:
     build: .
     restart: unless-stopped
-    network_mode: host # reach host loopback 127.0.0.1:15080 / :8123
+    ports:
+      - "${PORT:-3000}:3000" # the ONLY published port
     environment:
       TG_MINIAPP_MODE: preview # enables loading of .env.dev
       DEV_AUTH: "1" # allow ?devUserId= browser logins
       PORT: "3000"
     volumes:
-      - ./services.json:/app/services.json:ro
+      - ./services.dev.json:/app/services.json:ro
       - ./env.dev:/app/.env.dev:ro
+    depends_on:
+      - stub-game
+      - stub-home
 
   # ── Stub "game dashboard": nginx, zero custom config ─────────────────────
-  # Stock nginx config, stock port 80, one static page.
+  # Stock nginx config, stock port 80. Internal only.
   stub-game:
     image: nginx:1.27-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:15080:80"
+    expose:
+      - "80"
     volumes:
       - ./stub/game/index.html:/usr/share/nginx/html/index.html:ro
+    # no ports: → not reachable from the host or the internet
 
   # ── Stub "home dashboard": python stdlib server, zero config ─────────────
-  # Smallest possible dynamic-ish stand-in; serves the page and echoes
-  # request paths in the listing.
   stub-home:
     image: python:3.13-alpine
     restart: unless-stopped
     working_dir: /srv
     command: python3 -m http.server 8123
-    ports:
-      - "127.0.0.1:8123:8123"
+    expose:
+      - "8123"
     volumes:
       - ./stub/home/:/srv/:ro
+    # no ports: → internal only

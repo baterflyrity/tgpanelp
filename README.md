@@ -63,9 +63,9 @@ The service becomes available at `/svc/game/` for authorized users.
 
 ## Dev stack with stub services
 
-`docker-compose.dev.yml` runs the proxy plus **dumb stub upstreams** that
-publish on host loopback at exactly the ports `services.json` expects
-(nginx on `127.0.0.1:15080`, python stdlib server on `127.0.0.1:8123`):
+`docker-compose.dev.yml` runs the proxy plus **dumb stub upstreams** on the
+internal compose network — only the app port is published to the host. The
+proxy uses `services.dev.json` whose targets are compose DNS names:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
@@ -74,6 +74,24 @@ docker compose -f docker-compose.dev.yml up --build
 
 The proxy runs in testing mode inside the stack, so plain-browser logins work
 without a bot token.
+
+## Production stack with Caddy (automatic HTTPS)
+
+`docker-compose.yml` puts [Caddy](https://caddyserver.com/) in front of the
+proxy. Caddy issues and **renews certificates automatically** (ACME with
+Let's Encrypt) — no certbot, no cron. Configure in `.env` next to the file:
+
+```
+DOMAIN=panel.example.com      # DNS A record → this server
+ACME_EMAIL=you@example.com    # for Let's Encrypt registration
+HTTPS_PORT=443                # public https port (custom ports fine, e.g. 8443)
+HTTP_PORT=80                  # needed for the HTTP-01 challenge
+BOT_TOKEN=...                 # plus ALLOWED_USER_IDS, SESSION_SECRET
+```
+
+Then `docker compose up -d --build` and open `https://your.domain[:HTTPS_PORT]`.
+Custom HTTPS ports work because DNS records don't include ports; port 80 must
+stay reachable for certificate issuance/renewal.
 
 ## HTTPS: required for Telegram
 
