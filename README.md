@@ -61,6 +61,35 @@ Edit `services.json`:
 
 The service becomes available at `/svc/game/` for authorized users.
 
+## Dev stack with stub services
+
+`docker-compose.dev.yml` runs the proxy plus **dumb stub upstreams** that
+publish on host loopback at exactly the ports `services.json` expects
+(nginx on `127.0.0.1:15080`, python stdlib server on `127.0.0.1:8123`):
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+# then open http://localhost:3000/?devUserId=1
+```
+
+The proxy runs in testing mode inside the stack, so plain-browser logins work
+without a bot token.
+
+## HTTPS: required for Telegram
+
+Telegram Mini Apps **must be served over HTTPS** — plain `http://` URLs are
+rejected by BotFather when you register the web app and will not open in
+clients. Common setups:
+
+- **Caddy** in front of this server: automatic Let's Encrypt certs,
+  two-line config.
+- **nginx + certbot** if you already run nginx.
+- **A tunnel** (cloudflared, ngrok) for quick tests — it terminates TLS for
+  you and points at the Node server's port.
+
+Plain `http://localhost:3000/?devUserId=1` works only for browser testing,
+since no Telegram client is involved.
+
 ## Telegram wiring
 
 1. In @BotFather → `/mybots` → your bot → **Bot Settings → Menu Button** →
