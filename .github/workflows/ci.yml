@@ -56,7 +56,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Prepare Pages artifact (docsify site from docs/)
-        run: touch docs/.nojekyll
+        # docsify's default homepage is README.md in the doc root: ship a
+        # fresh copy of the repo README so /#/ renders (and stays in sync).
+        # Its relative badge links need badges/ shipped alongside.
+        run: |
+          cp README.md docs/README.md
+          cp -r badges docs/badges
+          touch docs/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

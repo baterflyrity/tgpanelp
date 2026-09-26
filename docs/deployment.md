@@ -17,8 +17,7 @@ flowchart LR
 git clone <your-repo> && cd <your-repo>
 
 # 2. Compose settings (domain + TLS)
-cp .env.compose.example .env    # or create .env manually, see below
-nano .env
+nano .env                       # DOMAIN, ACME_EMAIL, HTTPS_PORT, HTTP_PORT
 
 # 3. App configuration (secrets + services)
 cp config/app.example.json config/app.json
