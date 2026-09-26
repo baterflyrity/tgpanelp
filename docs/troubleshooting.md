@@ -19,7 +19,8 @@ from [@userinfobot](https://t.me/userinfobot), add it, then
 ## 403 `server_not_configured`
 
 Production mode with an empty `botToken`. Create `config/app.json` from
-`config/app.example.json`.
+`config/app.example.json` (or set the `BOT_TOKEN` env var, which overrides
+the file).
 
 ## Service card shows **offline** (red)
 
@@ -32,6 +33,10 @@ curl -v http://127.0.0.1:15080/     # same URL as config/services.json
 Inside compose, remember the target must be a **compose DNS name**
 (`http://stub-game:80`), not `127.0.0.1` — loopback inside the proxy container
 is the container itself. Statuses are cached 15s.
+
+> Note: through the proxy, a dead upstream surfaces as HTTP **504**
+> (`ECONNREFUSED`/`ENOTFOUND`/`ETIMEDOUT`; other proxy errors map to 500/502).
+> A dead upstream is *not* a 502 in general.
 
 ## Service card shows **stub** (amber)
 

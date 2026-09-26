@@ -23,20 +23,58 @@
       alias: {
         "/_sidebar.md": "/_sidebar.md",
       },
-      search: "auto",
+      search: {
+        // Object form required: a truthy string (e.g. "auto") is not handled
+        // by the search plugin and breaks its initialization.
+        paths: "auto",
+        depth: 3,
+        placeholder: "Type to search",
+        noData: "No results!",
+      },
       auto2top: true,
       plugins: [
+        // Mermaid support (docsify 4): fenced ```mermaid blocks must become
+        // <div class="mermaid"> elements before mermaid.run() is called.
+        // beforeEach sees raw markdown, afterEach sees HTML — so extract the
+        // fenced source into placeholders first, then swap in rendered divs.
         function (hook) {
-          var id = 0;
-          hook.afterEach(function () { id = 0; });
-          hook.afterEach(function (html) { return html; });
-        },
-        function (hook, vm) {
+          var dict = {};
+          hook.beforeEach(function (content) {
+            dict = {};
+            return content.replace(/```mermaid\n?([\s\S]*?)```/g, function (_, code) {
+              var key = "PLCMERMAID" + Object.keys(dict).length + "END";
+              dict[key] = code;
+              return key;
+            });
+          });
+          hook.afterEach(function (html) {
+            Object.keys(dict).forEach(function (key) {
+              // Escape so the browser parses the div's text back to the
+              // original source (diagram code may contain <, &, quotes).
+              var escaped = dict[key]
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;");
+              html = html.replace(key, function () {
+                return '<div class="mermaid">' + escaped + "</div>";
+              });
+            });
+            return html;
+          });
           hook.doneEach(function () {
-            if (window.mermaid) {
+            if (!window.mermaid) return;
+            // Lazy init: mermaid.min.js loads after the $docsify config, so
+            // window.mermaid is not available when this script is parsed.
+            if (!window.__mermaidReady) {
               window.mermaid.initialize({ startOnLoad: false, theme: "neutral" });
-              window.mermaid.run({ querySelector: ".mermaid" });
+              window.__mermaidReady = true;
             }
+            var blocks = document.querySelectorAll(".mermaid:not([data-processed])");
+            if (blocks.length === 0) return;
+            window.mermaid.run({ nodes: blocks });
+            document.querySelectorAll(".mermaid svg").forEach(function (svg) {
+              svg.style.maxWidth = "100%";
+              svg.style.height = "auto";
+            });
           });
         },
       ],

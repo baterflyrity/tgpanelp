@@ -10,7 +10,7 @@ bun run test:coverage   # + v8 coverage report (text, lcov, json-summary)
 | Suite | What it covers |
 |---|---|
 | `tests/unit.test.ts` | initData HMAC validation (accept/tamper/wrong-token/stale/malformed), upstream status probing (online with latency, offline, TTL cache) |
-| `tests/smoke.test.ts` | boots the **real server** in testing mode on a random port and drives the whole flow: health → dev auth → auth-gated service list → `/api/status` → proxied stub content with the `__t`→cookie exchange → forged-token rejection |
+| `tests/smoke.test.ts` | boots the **real server** in testing mode on a fixed test port (3457) and drives the whole flow: health → dev auth → auth-gated service list → `/api/status` → proxied stub content with the `__t`→cookie exchange → forged-token rejection |
 
 The smoke test is effectively a self-contained integration test of the exact
 path production traffic takes — if it passes, `bun run check` against your
@@ -75,7 +75,7 @@ once, if not already set).
 - Unit tests go in `tests/unit.test.ts` (or a sibling `*.test.ts`) and should
   not bind ports.
 - Anything HTTP-level belongs in `tests/smoke.test.ts` style: spawn
-  `server/index.ts` with `PORT=<random>` + `TG_MINIAPP_MODE=preview`, wait for
+  `server/index.ts` with `PORT=<free port>` + `TG_MINIAPP_MODE=preview`, wait for
   `/api/health`, exercise, kill.
 - Run the full suite locally before pushing; CI enforces the same via
   `bun run test:coverage`.

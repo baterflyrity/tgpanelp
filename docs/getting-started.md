@@ -54,8 +54,9 @@ bun run test             # unit + end-to-end smoke tests
 bun run test:coverage    # with a coverage report
 ```
 
-The smoke test boots the real server on a random port and drives the same
-flow as `bun run check`, so a green test run means the deployment path works.
+The smoke test boots the real server on a fixed test port (3457) and drives
+the same flow as `bun run check`, so a green test run means the deployment
+path works.
 
 ## Next steps
 
