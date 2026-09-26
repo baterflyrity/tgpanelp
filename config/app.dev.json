@@ -1,0 +1,7 @@
+{
+  "$comment": "Dev/testing config — used AS-IS in testing mode (NODE_ENV=development or TG_MINIAPP_MODE=preview). No secrets. Browser logins via ?devUserId=<n> plus stub upstream pages.",
+  "devAuth": true,
+  "stubUpstreams": true,
+  "allowedUserIds": ["*"],
+  "port": 3000
+}

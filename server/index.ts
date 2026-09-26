@@ -4,8 +4,16 @@ import type { Socket } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
-import { PORT, DEV_AUTH, ALLOWED_USER_IDS, SESSION_TTL_SECONDS } from "./config.js";
+import {
+  PORT,
+  DEV_AUTH,
+  ALLOWED_USER_IDS,
+  SESSION_TTL_SECONDS,
+  STUB_UPSTREAMS,
+  IS_TESTING_MODE,
+} from "./config.js";
 import { loadServices, type ServiceConfig } from "./services.js";
+import { stubHandler, isUpstreamReachable } from "./stubs.js";
 import {
   requireSession,
   handleAuth,
@@ -19,6 +27,11 @@ app.use(express.json({ limit: "1mb" }));
 
 const services = loadServices();
 const serviceByPath = new Map(services.map((s) => [s.path, s]));
+const stubHandlers = new Map(
+  STUB_UPSTREAMS && IS_TESTING_MODE
+    ? services.map((s) => [s.path, stubHandler(s)])
+    : [],
+);
 
 // ---------------------------------------------------------------------------
 // API
@@ -49,7 +62,13 @@ app.get(
 );
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, devAuth: DEV_AUTH });
+  res.json({
+    ok: true,
+    devAuth: DEV_AUTH,
+    testingMode: IS_TESTING_MODE,
+    stubUpstreams: STUB_UPSTREAMS && IS_TESTING_MODE,
+    services: services.length,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -117,14 +136,37 @@ app.use("/svc", (req: ProxyRequest, res, next) => {
 });
 
 // 2) Proxy HTTP. Runs after (1), so req.url is verified and __t-free.
+// In testing mode with stubs enabled, a dead upstream gets the built-in
+// stub page instead of a proxy error.
 app.use("/svc", (req: ProxyRequest, res, next) => {
   const svc = req.svc!;
-  // Strip the service prefix: upstream sees "/json", not "/game/json".
-  req.url = req.url.replace(/^\/[^/]*/, "") || "/";
-
   const viaQueryToken =
     typeof res.locals.viaQueryToken === "string" ? res.locals.viaQueryToken : null;
   const name = cookieNameFor(svc);
+
+  const stub = stubHandlers.get(svc.path);
+  if (stub) {
+    isUpstreamReachable(svc).then((up) => {
+      if (!up) {
+        // Strip the service prefix the same way the proxy would.
+        req.url = req.url.replace(/^\/[^/]*/, "") || "/";
+        // Perform the same ?__t → first-party-cookie exchange the real
+        // proxy does, so in-iframe navigation keeps authenticating.
+        if (viaQueryToken) {
+          res.append(
+            "Set-Cookie",
+            `${name}=${viaQueryToken}; Path=/svc/${svc.path}/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`,
+          );
+        }
+        stub(req, res);
+        return;
+      }
+      next();
+    });
+    return;
+  }
+  // Strip the service prefix: upstream sees "/json", not "/game/json".
+  req.url = req.url.replace(/^\/[^/]*/, "") || "/";
 
   const proxy = createProxyMiddleware({
     target: svc.target,
@@ -229,9 +271,10 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] dev auth: ${DEV_AUTH ? "ON" : "off"}`);
   console.log(
     `[server] allow-list: ${
-      ALLOWED_USER_IDS === "*" || ALLOWED_USER_IDS.trim() === ""
+      ALLOWED_USER_IDS.length === 0 ||
+      ALLOWED_USER_IDS.some((v) => String(v).trim() === "*")
         ? "open (any validated telegram user)"
-        : ALLOWED_USER_IDS
+        : ALLOWED_USER_IDS.join(", ")
     }`,
   );
   if (services.length === 0) {

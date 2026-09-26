@@ -12,6 +12,7 @@
     "start": "tsx server/index.ts",
     "dev:server": "NODE_ENV=development tsx watch server/index.ts",
     "typecheck": "tsc --noEmit",
+    "check": "node scripts/check.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

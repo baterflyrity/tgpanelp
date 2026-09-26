@@ -1,97 +1,127 @@
 import fs from "node:fs";
+import path from "node:path";
 
-// ── Env file model ──────────────────────────────────────────────────────────
+// ── Configuration model ─────────────────────────────────────────────────────
 //
-//  .env     — the ONE config file the server always loads. Production uses
-//             only this file. Committed example: env.example
-//  .env.dev — testing-mode profile (DEV_AUTH=1 etc.). Loaded ONLY when the
-//             process is a preview/test run, i.e. NODE_ENV=development or
-//             TG_MINIAPP_MODE=preview. NEVER loaded in production.
+// All app configuration lives in JSON files under config/ (mounted into the
+// container), NOT in env files. Edit on the server host + `compose up -d`
+// re-applies it without a rebuild.
 //
-// Precedence (highest wins): real environment → .env.dev (testing only) → .env
-// Empty values (KEY=) are treated as "not set" at every level, so you can
-// neutralize a higher-priority setting by giving it an empty value.
+//   config/app.json         — production app config (copy from app.example.json)
+//   config/app.dev.json     — testing config, used AS-IS (no secrets)
+//   config/services.json    — production services (real dashboards)
+//   config/services.dev.json— compose dev stub services
 //
-// Note: this workspace blocks creating files whose name starts with ".env",
-// so the committed dev profile uses the no-dot name "env.dev"; the loader
-// accepts both names.
+// Testing mode = NODE_ENV=development or TG_MINIAPP_MODE=preview (set by the
+// dev compose / sandbox preview). Precedence: real env vars → app.dev.json
+// (testing only) → app.json.
 
-function parseEnvFile(file: string, into: Record<string, string>): void {
+export const IS_TESTING_MODE =
+  process.env.NODE_ENV === "development" ||
+  process.env.TG_MINIAPP_MODE === "preview";
+
+export interface AppConfig {
+  botToken?: string;
+  allowedUserIds: string[];
+  sessionSecret?: string;
+  sessionTtlSeconds: number;
+  devAuth: boolean;
+  stubUpstreams: boolean;
+  port: number;
+}
+
+const DEFAULTS: AppConfig = {
+  allowedUserIds: ["*"],
+  sessionTtlSeconds: 43200,
+  devAuth: false,
+  stubUpstreams: false,
+  port: 3000,
+};
+
+function readJsonIfExists(file: string): Record<string, unknown> | null {
   try {
-    const raw = fs.readFileSync(file, "utf8");
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      let value = trimmed.slice(eq + 1).trim();
-      if (
-        value.length >= 2 &&
-        ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'")))
-      ) {
-        value = value.slice(1, -1);
-      }
-      if (!(key in into)) into[key] = value;
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[config] could not parse ${file}:`, (err as Error).message);
     }
-  } catch {
-    // file missing — fine
+    return null;
   }
 }
 
-function firstSet(...values: (string | undefined)[]): string | undefined {
-  for (const v of values) {
-    if (v !== undefined && v !== "") return v;
+function pick<T>(...candidates: (T | undefined | null)[]): T | undefined {
+  for (const c of candidates) {
+    if (c !== undefined && c !== null && c !== "") return c;
   }
   return undefined;
 }
 
-const isTestingMode =
-  process.env.NODE_ENV === "development" ||
-  process.env.TG_MINIAPP_MODE === "preview";
+const appJson = readJsonIfExists(path.resolve("config/app.json")) ?? {};
+const appDevJson = IS_TESTING_MODE
+  ? readJsonIfExists(path.resolve("config/app.dev.json")) ?? {}
+  : {};
 
-const baseEnv: Record<string, string> = {};
-const devEnv: Record<string, string> = {};
-parseEnvFile(".env", baseEnv);
-if (isTestingMode) {
-  parseEnvFile(".env.dev", devEnv);
-  parseEnvFile("env.dev", devEnv);
+const ENV_ALIASES: Record<string, string> = {
+  botToken: "BOT_TOKEN",
+  sessionSecret: "SESSION_SECRET",
+};
+
+function mergeAppConfig(): AppConfig {
+  const merged: AppConfig = { ...DEFAULTS };
+  // Layers, lowest → highest: defaults → app.json → app.dev.json → env vars.
+  for (const layer of [appJson, appDevJson]) {
+    for (const [k, v] of Object.entries(layer)) {
+      if (k === "$comment" || v === null || v === "" || v === undefined) continue;
+      (merged as unknown as Record<string, unknown>)[k] = v;
+    }
+  }
+  // Env var overrides (BOT_TOKEN, SESSION_SECRET) for secret-injection setups.
+  for (const [jsonKey, envKey] of Object.entries(ENV_ALIASES)) {
+    const raw = process.env[envKey];
+    if (raw) (merged as unknown as Record<string, unknown>)[jsonKey] = raw;
+  }
+  return merged;
 }
 
-export function env(key: string): string | undefined {
-  return firstSet(process.env[key], devEnv[key], baseEnv[key]);
-}
+export const appConfig: AppConfig = mergeAppConfig();
 
-// ── App settings ────────────────────────────────────────────────────────────
+// ── Resolved values (used across the server) ────────────────────────────────
 
 /** Telegram bot token used to validate initData and sign session tokens. */
-export const BOT_TOKEN = env("BOT_TOKEN") ?? "";
+export const BOT_TOKEN = appConfig.botToken ?? "";
 
 /**
- * Comma-separated Telegram user ids allowed to use the app.
- * Empty or "*" means everyone who passes initData validation.
+ * Comma- or list-style Telegram user ids allowed to use the app.
+ * ["*"] (or an id "*") means everyone who passes initData validation.
  */
-export const ALLOWED_USER_IDS = env("ALLOWED_USER_IDS") ?? "*";
+export const ALLOWED_USER_IDS = appConfig.allowedUserIds;
 
 export function isUserAllowed(userId: number): boolean {
-  const raw = ALLOWED_USER_IDS.trim();
-  if (raw === "" || raw === "*") return true;
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .some((s) => Number(s) === userId);
+  return ALLOWED_USER_IDS.some((raw) => {
+    const v = String(raw).trim();
+    return v === "*" || v === "" || Number(v) === userId;
+  });
 }
 
 /** Testing mode: allows fake initData for browser testing outside Telegram. */
-export const DEV_AUTH = env("DEV_AUTH") === "1";
+export const DEV_AUTH = appConfig.devAuth === true;
+
+/**
+ * Testing mode only: serve built-in stub pages for services with nothing
+ * real listening, so the proxy flow can be verified with zero setup.
+ */
+export const STUB_UPSTREAMS = appConfig.stubUpstreams === true;
 
 /** Secret used to sign session tokens (falls back to bot token). */
 export const SESSION_SECRET =
-  env("SESSION_SECRET") || BOT_TOKEN || "insecure-dev-secret";
+  appConfig.sessionSecret || BOT_TOKEN || "insecure-dev-secret";
 
-export const PORT = Number(env("PORT") ?? 3000);
+export const PORT = Number(process.env.PORT ?? appConfig.port ?? 3000);
 
 /** How long a session token lives, in seconds (default 12h). */
-export const SESSION_TTL_SECONDS = Number(env("SESSION_TTL_SECONDS") ?? 43200);
+export const SESSION_TTL_SECONDS = Number(
+  appConfig.sessionTtlSeconds ?? 43200,
+);

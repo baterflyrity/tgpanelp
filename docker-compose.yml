@@ -1,16 +1,15 @@
 # Production stack: Caddy (automatic HTTPS) + the mini-app proxy.
 #
-# Configure via your .env next to this file (see env.example):
-#   DOMAIN=panel.example.com        # DNS A record → this server
-#   ACME_EMAIL=you@example.com      # Let's Encrypt registration email
-#   HTTPS_PORT=443                  # public HTTPS port (any free port works)
-#   HTTP_PORT=80                    # ACME HTTP-01 challenge port (keep 80 if you can)
-#   PORT=3000                       # internal app port inside the compose network
+# All app configuration lives in config/ — edit it on the server host, then
+# `docker compose up -d` re-applies it WITHOUT a rebuild:
 #
-# Then:
-#   docker compose up -d --build
+#   config/app.json        ← copy from config/app.example.json, fill in
+#   config/services.json   ← your real dashboards (127.0.0.1:<port> targets)
 #
-# https://$DOMAIN[:$HTTPS_PORT]  →  Caddy (auto-TLS, auto-renew)  →  proxy:3000
+# Compose-level settings (ports, domain) come from .env next to this file:
+#   DOMAIN, ACME_EMAIL, HTTPS_PORT, HTTP_PORT
+#
+# Update workflow:  git pull && nano config/*.json && docker compose up -d
 
 services:
   caddy:
@@ -24,7 +23,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data # certificates + ACME account keys
+      - caddy_data:/data # certificates + ACME account keys (auto-renew)
       - caddy_config:/config
     depends_on:
       - proxy
@@ -33,15 +32,12 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      # Production mode: only .env is read by the server; DEV_AUTH must not
-      # be set anywhere. If you keep app config in the compose .env, pass it
-      # through explicitly:
-      BOT_TOKEN: ${BOT_TOKEN:?set BOT_TOKEN in .env}
-      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS:-*}
-      SESSION_SECRET: ${SESSION_SECRET:-}
+      # Production mode: config/app.json is read; app.dev.json is ignored.
+      # BOT_TOKEN env var, if set, overrides config/app.json's botToken.
       PORT: 3000
     volumes:
-      - ./services.json:/app/services.json:ro
+      - ./config:/app/config:ro
+    depends_on: []
 
 volumes:
   caddy_data:

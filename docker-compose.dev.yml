@@ -1,18 +1,20 @@
-# Development stack: the mini-app proxy plus DUMB STUB SERVICES standing in
-# for the real dashboards. NO host networking: only the app port is published
-# to the host; stubs live on the internal compose network and are reached via
-# compose service DNS names.
+# Development stack: the mini-app proxy plus DUMB STUB SERVICES on the
+# internal compose network. Only the app port is published to the host.
 #
-# Because of that, the proxy uses services.dev.json whose targets are the
-# compose DNS names (http://stub-game:80, http://stub-home:8123) instead of
-# your production 127.0.0.1:* targets.
+# Config is mounted from config/ (edit + `compose up -d`, no rebuild):
+#   config/app.dev.json     — used AS-IS (testing mode: dev logins + stubs)
+#   config/services.dev.json— targets are compose DNS names (stub-game:80 …)
 #
 # Usage:
 #   docker compose -f docker-compose.dev.yml up --build
 #   open http://localhost:3000/?devUserId=1
 #
-# Testing mode (TG_MINIAPP_MODE=preview + DEV_AUTH=1 via mounted env.dev)
-# lets any browser log in with ?devUserId=<n>.
+# Then verify everything in one command (from the repo root, host side):
+#   bun run check http://localhost:3000
+#
+# The proxy runs in testing mode, so config/app.dev.json applies
+# (devAuth + stubUpstreams). Point config/services.dev.json at real
+# dashboards instead of stubs and they will be proxied when reachable.
 
 services:
   proxy:
@@ -21,18 +23,15 @@ services:
     ports:
       - "${PORT:-3000}:3000" # the ONLY published port
     environment:
-      TG_MINIAPP_MODE: preview # enables loading of .env.dev
-      DEV_AUTH: "1" # allow ?devUserId= browser logins
+      TG_MINIAPP_MODE: preview # switches the server to testing config
       PORT: "3000"
     volumes:
-      - ./services.dev.json:/app/services.json:ro
-      - ./env.dev:/app/.env.dev:ro
+      - ./config:/app/config:ro
     depends_on:
       - stub-game
       - stub-home
 
   # ── Stub "game dashboard": nginx, zero custom config ─────────────────────
-  # Stock nginx config, stock port 80. Internal only.
   stub-game:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -40,7 +39,7 @@ services:
       - "80"
     volumes:
       - ./stub/game/index.html:/usr/share/nginx/html/index.html:ro
-    # no ports: → not reachable from the host or the internet
+    # no ports: → internal only
 
   # ── Stub "home dashboard": python stdlib server, zero config ─────────────
   stub-home:

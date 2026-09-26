@@ -1,0 +1,10 @@
+{
+  "$comment": "Production config template. Copy to config/app.json on your server, fill in, `docker compose up -d` — no rebuild needed. Env vars still override (BOT_TOKEN etc.).",
+  "botToken": "",
+  "allowedUserIds": ["*"],
+  "sessionSecret": "",
+  "sessionTtlSeconds": 43200,
+  "devAuth": false,
+  "stubUpstreams": false,
+  "port": 3000
+}

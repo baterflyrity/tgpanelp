@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { IS_TESTING_MODE } from "./config.js";
 
 export interface ServiceConfig {
   id: string;
@@ -16,20 +17,31 @@ export interface ServiceConfig {
 }
 
 export function loadServices(): ServiceConfig[] {
-  const file = path.resolve("services.json");
+  const file = path.resolve(
+    IS_TESTING_MODE ? "config/services.dev.json" : "config/services.json",
+  );
+  let list: unknown[] = [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    const list: unknown[] = Array.isArray(parsed) ? parsed : (parsed.services ?? []);
-    return list
-      .map((s) => s as ServiceConfig)
-      .filter((s) => s && s.id && s.target && s.path)
-      .map((s) => ({
-        ...s,
-        target: s.target.replace(/\/+$/, ""),
-        path: s.path.replace(/^\/+|\/+$/g, ""),
-      }));
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      services?: unknown[];
+    };
+    list = Array.isArray(parsed.services) ? parsed.services : [];
   } catch (err) {
-    console.warn(`[services] could not load ${file}:`, (err as Error).message);
-    return [];
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[services] could not parse ${file}:`, (err as Error).message);
+    }
   }
+  const seen = new Set<string>();
+  return list
+    .map((s) => s as ServiceConfig)
+    .filter(
+      (s) =>
+        s && s.id && s.target && s.path &&
+        !seen.has(s.path) && seen.add(s.path),
+    )
+    .map((s) => ({
+      ...s,
+      target: s.target.replace(/\/+$/, ""),
+      path: s.path.replace(/^\/+|\/+$/g, ""),
+    }));
 }
