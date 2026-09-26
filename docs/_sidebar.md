@@ -1,0 +1,7 @@
+- [Home](/)
+- [Getting started](getting-started.md)
+- [Configuration](configuration.md)
+- [Deployment](deployment.md)
+- [Architecture](architecture.md)
+- [Testing & CI](testing.md)
+- [Troubleshooting](troubleshooting.md)

@@ -1,182 +1,149 @@
 # Telegram Mini App → Local Dashboards Proxy
 
-A Telegram Mini App that validates users via signed initData + allow-list, then
-proxies their browsers to internal dashboards running on the same server
-(localhost-only services, nothing exposed publicly).
+[![CI](https://github.com/baterflyrity/tgpanelp/actions/workflows/ci.yml/badge.svg)](https://github.com/baterflyrity/tgpanelp/actions/workflows/ci.yml)
+[![tests](badges/tests.svg)](.github/workflows/ci.yml)
+[![coverage](badges/coverage.svg)](.github/workflows/ci.yml)
+[**📖 Full documentation**](https://baterflyrity.github.io/tgpanelp/) — architecture, configuration cases, deployment, troubleshooting
+
+A Telegram Mini App that authenticates users with Telegram's signed `initData`
+(allow-list enforced server-side) and proxies their browser to internal
+dashboards running on the same server — services bound to `127.0.0.1:<port>`
+that are otherwise unreachable from the internet.
+
+```
+Telegram client → Mini App (validated) → dashboard cards (with live status)
+              → "Game Dashboard" → proxied view of 127.0.0.1:15080
+```
+
+Each service card shows **online / offline / stub** status with latency,
+polled every 15 seconds.
+
+## Quick start (development)
+
+```bash
+bun install          # or npm install
+bun run build
+TG_MINIAPP_MODE=preview bun run start
+bun run check        # verifies the whole flow in one command
+```
+
+Open `http://localhost:3000/?devUserId=42` — no bot token, no Telegram needed:
+testing mode accepts dev logins and serves built-in **stub pages** for any
+service whose real upstream isn't running. Prefer containers?
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+## Usage
+
+### Installation
+
+```bash
+bun install          # dev dependencies + runtime deps
+bun run build        # builds the SPA into dist/ (served by the Node server)
+```
+
+### Configuration
+
+All app configuration lives in `config/` (mounted into compose — edit on the
+host, no rebuild):
+
+| File | Purpose |
+|---|---|
+| `config/app.example.json` | **Production template** — copy to `app.json`, fill in |
+| `config/app.dev.json` | Testing config, **works as-is** (no secrets) |
+| `config/services.json` | Production services → `http://127.0.0.1:<port>` |
+| `config/services.dev.json` | Dev compose services → compose DNS names |
+
+```jsonc
+// config/app.json (production) — the essentials
+{
+  "botToken": "7000000000:AA...",       // from @BotFather
+  "allowedUserIds": ["123456789"],      // real Telegram ids, "*" = open
+  "sessionSecret": "random-64-chars"
+}
+```
+
+Production mode reads `app.json` + `services.json` only; testing mode
+(`NODE_ENV=development` or `TG_MINIAPP_MODE=preview`) reads the `.dev`
+variants. [Full configuration reference](https://baterflyrity.github.io/tgpanelp/#/configuration)
+with per-environment cases (local / compose / VPS / managed preview).
+
+### Running
+
+| Environment | Command |
+|---|---|
+| Local testing (stubs, no Docker) | `TG_MINIAPP_MODE=preview bun run start` |
+| Local production build | `bun run start` |
+| Dev compose (stub containers) | `docker compose -f docker-compose.dev.yml up --build` |
+| Production (Caddy + auto-HTTPS) | `cp config/app.example.json config/app.json && nano config/app.json .env && docker compose up -d --build` |
+
+### Updating
+
+```bash
+git pull
+nano config/*.json        # optional changes
+docker compose up -d      # applies config — no rebuild needed
+```
+
+Rebuild only when code changes: `docker compose up -d --build`.
+
+### Testing
+
+```bash
+bun run test              # unit + end-to-end smoke (boots the real server)
+bun run test:coverage     # + coverage report
+bun run check [url]       # verify any deployment: health → auth → proxy flow
+bun run typecheck         # tsc --noEmit
+```
+
+The smoke suite drives the exact production path (HMAC validation, allow-list,
+cookie exchange, forged-token rejection), so green CI ≈ working deployment.
+[Testing & CI details](https://baterflyrity.github.io/tgpanelp/#/testing).
 
 ## How it works
 
 ```
 Telegram client
-  └─ Mini App (React, served by Node server)
-       └─ initData → POST /api/auth → HMAC-verified, allow-listed → session token
-            └─ User picks a service → iframe loads /svc/<name>/?__t=<token>
-                 └─ Node server strips __t, verifies it, injects first-party
-                    cookie, and reverse-proxies to http://127.0.0.1:<port>
+  └─ Mini App SPA ── initData ──▶ POST /api/auth
+                                    │  HMAC-SHA256 (WebAppData) + allow-list
+                                    ▼
+                              session token (body.exp.sig)
+  └─ iframe /svc/game/?__t=token ──▶ server verifies, strips __t,
+       sets first-party HttpOnly cookie, reverse-proxies
+         ▶ http://127.0.0.1:15080 (upstream sees no token)
 ```
 
-- **Validation:** Telegram's official HMAC-SHA256 scheme (`WebAppData` key).
-- **Allow-list:** `allowedUserIds` in `config/app.json` (list of Telegram ids, `"*"` = open).
-- **Proxy:** `http-proxy-middleware` with cookie rewriting so upstream apps
-  that set their own cookies keep working; hop-by-hop headers are stripped.
-- **WebSockets:** upgrade requests under `/svc/*` are proxied too.
-- **Testing mode:** with `devAuth: true` (as in `config/app.dev.json`), anyone
-  can test in a plain browser using `?devUserId=123` — no Telegram needed.
-  Testing config is loaded ONLY in testing runs (`NODE_ENV=development` or
-  `TG_MINIAPP_MODE=preview`); production reads `config/app.json` exclusively.
+- Official Telegram initData validation, timing-safe; 24h freshness window
+- Per-service session cookies → in-iframe navigations & WebSockets just work
+- Redirect rewriting (`Location: /json` → `/svc/game/json`), cookie path rewriting
+- WebSocket upgrades proxied under `/svc/*`
+- Live status endpoint with TTL-cached probes (15s)
 
-## Setup (development)
+Deep dive with mermaid diagrams:
+[Architecture](https://baterflyrity.github.io/tgpanelp/#/architecture).
 
-```bash
-bun install
-bun run build
-TG_MINIAPP_MODE=preview bun run start   # testing config from config/app.dev.json
-bun run check                            # verify the whole flow in one command
-# dashboard: http://localhost:3000/?devUserId=42
-```
+## HTTPS
 
-Hot reload while hacking: `bun run dev:server` (API) + `bun run dev` (Vite on
-:5173, proxies /api).
+Telegram requires Mini Apps to be served over **HTTPS** (BotFather rejects
+`http://`). The production compose includes Caddy, which issues and
+auto-renews Let's Encrypt certificates; custom HTTPS ports work (e.g.
+`HTTPS_PORT=8443` → `https://your.domain:8443`), port 80 must stay reachable
+for the ACME challenge. [Deployment guide](https://baterflyrity.github.io/tgpanelp/#/deployment).
 
-## Configuration (files, not env)
-
-All app configuration lives in `config/`:
-
-| File | Purpose |
-|---|---|
-| `config/app.example.json` | **Production template** — copy to `config/app.json` and fill in |
-| `config/app.json` | Production app config (created by you; git-ignored) |
-| `config/app.dev.json` | **Testing config — use as-is** (no secrets; enables dev logins + stubs) |
-| `config/services.json` | Production services → `http://127.0.0.1:<port>` targets |
-| `config/services.dev.json` | Compose dev services → compose DNS targets |
-
-Which file is used: in **testing mode** (`NODE_ENV=development` or
-`TG_MINIAPP_MODE=preview`, set by the dev compose) the server reads
-`app.dev.json` + `services.dev.json`; in **production** it reads `app.json`
-+ `services.json` only. Env vars `BOT_TOKEN`/`SESSION_SECRET` still override
-the JSON if you prefer secret injection.
-
-The `config/` directory is **mounted into the container**, so the update
-workflow is edit-on-host, no rebuild:
-
-```bash
-git pull
-cp config/app.example.json config/app.json   # first time only, then fill in
-nano config/app.json config/services.json    # change anything
-docker compose up -d                          # re-applies config
-```
-
-## Dev environment
-
-Three ways to run it — pick one:
-
-1. **Sandbox/managed preview** (this workspace): already in testing mode.
-   Open the preview URL with `?devUserId=42`.
-2. **Local without Docker** — built-in stubs stand in for your dashboards:
-   ```bash
-   bun install && bun run build
-   bun run start                 # testing config via config/app.dev.json*
-   bun run check                 # verifies the whole flow in one command
-   # dashboard: http://localhost:3000/?devUserId=42
-   ```
-   *`bun run start` is production-mode by default; for testing mode run
-   `TG_MINIAPP_MODE=preview bun run start`.
-3. **Docker compose** (proxy + nginx/python stub containers):
-   ```bash
-   docker compose -f docker-compose.dev.yml up --build
-   bun run check http://localhost:3000
-   ```
-
-`bun run check [url]` runs the full user flow end-to-end: health → dev
-auth → service list → proxied content per service (cookie exchange,
-`x-proxied-by` marker, non-empty body) — and exits non-zero on failure.
-
-## Adding a service
-
-Edit `config/services.json` (or `config/services.dev.json` for the dev stack):
-
-## Dev stack with stub services
-
-`docker-compose.dev.yml` runs the proxy plus **dumb stub upstreams** on the
-internal compose network — only the app port is published to the host. The
-proxy uses `config/services.dev.json` whose targets are compose DNS names:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-# then open http://localhost:3000/?devUserId=1
-```
-
-The proxy runs in testing mode inside the stack, so plain-browser logins work
-without a bot token.
-
-## Production stack with Caddy (automatic HTTPS)
-
-`docker-compose.yml` puts [Caddy](https://caddyserver.com/) in front of the
-proxy. Caddy issues and **renews certificates automatically** (ACME with
-Let's Encrypt) — no certbot, no cron. Compose-level settings live in `.env`
-next to the compose file (only DOMAIN/ports/email — app config is in
-`config/`):
+## Repository layout
 
 ```
-DOMAIN=panel.example.com      # DNS A record → this server
-ACME_EMAIL=you@example.com    # for Let's Encrypt registration
-HTTPS_PORT=443                # public https port (custom ports fine, e.g. 8443)
-HTTP_PORT=80                  # needed for the HTTP-01 challenge
+├── server/        # Express API, proxy, auth, config, stubs, status
+├── src/           # Mini App SPA (React, Telegram theme)
+├── config/        # ALL runtime configuration (mounted into containers)
+├── docs/          # documentation site (docsify → GitHub Pages)
+├── scripts/       # check.mjs (verify), badges.mjs (CI badges)
+├── tests/         # vitest unit + smoke suites
+└── stub/          # static pages for compose dev stubs
 ```
 
-Then `docker compose up -d --build` and open `https://your.domain[:HTTPS_PORT]`.
-Custom HTTPS ports work because DNS records don't include ports; port 80 must
-stay reachable for certificate issuance/renewal.
+## License
 
-## HTTPS: required for Telegram
-
-Telegram Mini Apps **must be served over HTTPS** — plain `http://` URLs are
-rejected by BotFather when you register the web app and will not open in
-clients. Common setups:
-
-- **Caddy** in front of this server: automatic Let's Encrypt certs,
-  two-line config.
-- **nginx + certbot** if you already run nginx.
-- **A tunnel** (cloudflared, ngrok) for quick tests — it terminates TLS for
-  you and points at the Node server's port.
-
-Plain `http://localhost:3000/?devUserId=1` works only for browser testing,
-since no Telegram client is involved.
-
-## Telegram wiring
-
-1. In @BotFather → `/mybots` → your bot → **Bot Settings → Menu Button** →
-   set it to your mini app URL (`https://your-domain.tld`).
-2. Or send users an inline button: `web_app` type with your URL.
-3. The domain must be HTTPS. For local testing use a tunnel (cloudflared,
-   ngrok) pointed at your Node server port.
-
-## Production
-
-```bash
-bun run build
-bun run start        # serves dist/ + API + proxy on one port
-```
-
-In production the server reads `config/app.json` + `config/services.json`
-only — the `.dev` variants are ignored, and `devAuth` must never be true
-there. `config/app.json` is git-ignored; create it from the template:
-
-```bash
-cp config/app.example.json config/app.json   # fill in botToken etc.
-```
-
-Or with Docker (config mounted, no rebuild on edits):
-
-```bash
-nano config/app.json config/services.json
-docker compose up -d
-```
-
-Notes:
-
-- Sessions are in-memory; if you run multiple replicas, move them to Redis.
-- Your Telegram app domain needs a reverse proxy (nginx/Caddy) terminating
-  TLS in front of this server.
-- Upstream services must be bound to 127.0.0.1 so they stay off the public
-  internet; this proxy is the only public entry point.
+MIT — see [LICENSE](LICENSE).

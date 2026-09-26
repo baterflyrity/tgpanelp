@@ -14,6 +14,7 @@ import {
 } from "./config.js";
 import { loadServices, type ServiceConfig } from "./services.js";
 import { stubHandler, isUpstreamReachable } from "./stubs.js";
+import { probeUpstream } from "./status.js";
 import {
   requireSession,
   handleAuth,
@@ -37,10 +38,27 @@ const stubHandlers = new Map(
 // API
 // ---------------------------------------------------------------------------
 
-app.post("/api/auth", handleAuth);
+app.post("/api/auth", handleAuth);app.get(
+  "/api/status",
+  requireSession,
+  async (req: AuthedRequest, res) => {
+    const statuses = await Promise.all(services.map(probeUpstream));
+    const stubActive = new Set<string>();
+    if (STUB_UPSTREAMS && IS_TESTING_MODE) {
+      for (const svc of services) {
+        if (!(await isUpstreamReachable(svc))) stubActive.add(svc.path);
+      }
+    }
+    res.json({
+      services: statuses.map((s) => ({
+        ...s,
+        status: stubActive.has(s.path) ? ("stub" as const) : s.status,
+      })),
+    });
+  },
+);
 
-app.get(
-  "/api/services",
+app.get("/api/services",
   requireSession,
   (req: AuthedRequest, res) => {
     res.json({

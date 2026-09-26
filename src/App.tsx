@@ -1,17 +1,36 @@
 import { useEffect, useState } from "react";
 import { Loading, ErrorState } from "./components/States";
-import { useAuth, useServices, serviceUrl, type ServiceInfo } from "./lib/api";
+import {
+  useAuth,
+  useServices,
+  useServiceStatus,
+  serviceUrl,
+  type ServiceInfo,
+  type ServiceStatus,
+} from "./lib/api";
 import { getWebApp, hapticTap } from "./lib/telegram";
 import { useTheme } from "./lib/useTheme";
 import { useMiniRouter } from "./lib/useMiniRouter";
 
+const STATUS_META: Record<
+  ServiceStatus["status"],
+  { label: string; dot: string; text: string }
+> = {
+  online: { label: "online", dot: "bg-emerald-400", text: "text-emerald-400" },
+  offline: { label: "offline", dot: "bg-red-400", text: "text-red-400" },
+  stub: { label: "stub", dot: "bg-amber-400", text: "text-amber-400" },
+};
+
 function ServiceCard({
   svc,
+  status,
   onOpen,
 }: {
   svc: ServiceInfo;
+  status?: ServiceStatus;
   onOpen: () => void;
 }) {
+  const meta = status ? STATUS_META[status.status] : null;
   return (
     <button
       onClick={onOpen}
@@ -24,6 +43,15 @@ function ServiceCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="truncate text-base font-semibold">{svc.title}</h3>
+            {meta ? (
+              <span
+                className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.text}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                {meta.label}
+                {status?.latencyMs != null ? ` ${status.latencyMs}ms` : ""}
+              </span>
+            ) : null}
             <span className="ml-auto text-tg-hint transition group-active:text-tg-link">
               →
             </span>
@@ -90,6 +118,7 @@ export default function App() {
   const { scheme } = useTheme();
   const auth = useAuth();
   const { services, loading: servicesLoading } = useServices(auth.token);
+  const statuses = useServiceStatus(auth.token);
   const { view, open, close } = useMiniRouter();
 
   const activeService =
@@ -157,6 +186,7 @@ export default function App() {
             <ServiceCard
               key={svc.id}
               svc={svc}
+              status={statuses[svc.path]}
               onOpen={() => {
                 hapticTap(getWebApp());
                 open(svc.path);

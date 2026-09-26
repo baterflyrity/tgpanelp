@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface ServiceInfo {
   id: string;
@@ -6,6 +6,14 @@ export interface ServiceInfo {
   emoji: string;
   description?: string;
   path: string;
+}
+
+export interface ServiceStatus {
+  id: string;
+  path: string;
+  status: "online" | "offline" | "stub";
+  latencyMs: number | null;
+  checkedAt: number;
 }
 
 export interface UserInfo {
@@ -24,7 +32,7 @@ interface AuthState {
 
 /**
  * Auth flow:
- *  1. Grab Telegram initData (or a dev id when DEV_AUTH=1 on the server).
+ *  1. Grab Telegram initData (or a dev id when testing mode is on).
  *  2. POST to /api/auth -> { token, user }.
  *  3. Keep token in memory + sessionStorage so reloads re-auth fast.
  */
@@ -69,7 +77,7 @@ export function useAuth(): AuthState & { retry: () => void } {
           await authenticate(initData);
         } else {
           // No Telegram context: try testing mode. The server decides whether
-          // it is enabled (.env.dev / DEV_AUTH=1) — the client never guesses.
+          // it is enabled (config/app.dev.json) — the client never guesses.
           const devId = Number(new URLSearchParams(location.search).get("devUserId") ?? 1);
           await authenticate("", devId);
         }
@@ -130,6 +138,46 @@ export function useServices(token: string | null) {
   }, [token]);
 
   return { services, loading };
+}
+
+/**
+ * Poll upstream statuses every 15s (server caches probes for the same TTL).
+ */
+export function useServiceStatus(token: string | null) {
+  const [statuses, setStatuses] = useState<Record<string, ServiceStatus>>({});
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/status", {
+          headers: { Authorization: `Bearer ${tokenRef.current ?? ""}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { services: ServiceStatus[] };
+        if (!cancelled) {
+          const byPath: Record<string, ServiceStatus> = {};
+          for (const s of data.services ?? []) byPath[s.path] = s;
+          setStatuses(byPath);
+        }
+      } catch {
+        // transient network error — keep last known statuses
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [token]);
+
+  return statuses;
 }
 
 /**
